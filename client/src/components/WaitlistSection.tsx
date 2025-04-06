@@ -49,7 +49,7 @@ export default function WaitlistSection() {
       const data = await response.json();
       toast({
         title: "Success!",
-        description: data.message || "You've been added to our waitlist.",
+        description: "You've been added to our waitlist! Check your email for a confirmation message.",
         variant: "default",
       });
       form.reset();
