@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground scroll-smooth;
+  }
+  
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222.2 47.4% 11.2%;
+    
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 47.4% 11.2%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 47.4% 11.2%;
+    
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    
+    --primary: 217 100% 62%;
+    --primary-foreground: 210 40% 98%;
+    
+    --secondary: 266 100% 56%;
+    --secondary-foreground: 210 40% 98%;
+    
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    
+    --destructive: 0 100% 50%;
+    --destructive-foreground: 210 40% 98%;
+    
+    --ring: 215 20.2% 65.1%;
+    
+    --radius: 0.5rem;
+    
+    --chart-1: 217 100% 62%;
+    --chart-2: 266 100% 56%;
+    --chart-3: 222.2 47.4% 11.2%;
+    --chart-4: 215.4 16.3% 46.9%;
+    --chart-5: 0 100% 50%;
+  }
+}
+
+@layer components {
+  .section-fade-in {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+  }
+  
+  .section-fade-in.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  
+  .button-cta {
+    @apply transition-all;
+  }
+  
+  .button-cta:hover {
+    transform: translateY(-2px);
+    @apply shadow-lg;
+  }
+  
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+  }
+  
+  .animate-slide-up {
+    animation: slideUp 0.5s ease-out;
+  }
+  
+  .animate-bounce-subtle {
+    animation: bounceSlight 3s infinite;
+  }
+  
+  @keyframes fadeIn {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+  }
+  
+  @keyframes slideUp {
+    0% { transform: translateY(20px); opacity: 0; }
+    100% { transform: translateY(0); opacity: 1; }
+  }
+  
+  @keyframes bounceSlight {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+  
+  @media (prefers-reduced-motion) {
+    .animate-bounce-subtle, .section-fade-in, .button-cta {
+      animation: none;
+      transition: none;
+    }
+  }
+}
