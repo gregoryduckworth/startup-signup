@@ -1,6 +1,8 @@
-node_modules
-dist
 .DS_Store
-server/public
-vite.config.ts.*
 *.tar.gz
+dist
+node_modules
+playwright-report
+server/public
+test-results
+vite.config.ts.*
