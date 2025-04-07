@@ -99,22 +99,38 @@ function createBranchAndPR(branch, filePath, testTitle) {
 
   runCommand(`git checkout -b ${branch}`);
   runCommand(`git add ${filePath}`);
-  runCommand(`git commit -m "fix: auto-fix for failing test '${testTitle}'"`);
 
-  runCommand(
-    `git remote set-url origin https://x-access-token:${process.env.PAT_TOKEN}@github.com/${process.env.GITHUB_REPOSITORY}.git`
-  );
-
-  runCommand(`git push --set-upstream origin ${branch}`);
-
-  runCommand(
-    `gh pr create --title "🛠️ Auto-fix: ${testTitle}" --body "This PR auto-fixes the test '${testTitle}' using GPT-4." --base main`,
-    {
-      env: {
-        GH_TOKEN: process.env.GITHUB_TOKEN,
-      },
+  try {
+    // Check if there is anything to commit
+    const diff = execSync("git diff --cached").toString().trim();
+    if (!diff) {
+      console.log(
+        `⚠️ No changes detected for '${testTitle}'. Skipping commit & PR.`
+      );
+      runCommand(`git checkout main`);
+      runCommand(`git branch -D ${branch}`);
+      return;
     }
-  );
+
+    runCommand(`git commit -m "fix: auto-fix for failing test '${testTitle}'"`);
+
+    runCommand(
+      `git remote set-url origin https://x-access-token:${process.env.PAT_TOKEN}@github.com/${process.env.GITHUB_REPOSITORY}.git`
+    );
+
+    runCommand(`git push --set-upstream origin ${branch}`);
+
+    runCommand(
+      `gh pr create --title "🛠️ Auto-fix: ${testTitle}" --body "This PR auto-fixes the test '${testTitle}' using GPT-4." --base main`,
+      {
+        env: {
+          GH_TOKEN: process.env.GITHUB_TOKEN,
+        },
+      }
+    );
+  } catch (err) {
+    console.error("❌ PR creation failed:", err);
+  }
 }
 
 async function main() {
