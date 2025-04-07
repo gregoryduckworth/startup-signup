@@ -116,7 +116,9 @@ async function main() {
 
   writeFile(file, fixedCode);
 
-  const branch = `autofix/${basename(file, ".ts")}-${new Date().toISOString()}`;
+  const branch = `autofix/${basename(file, ".ts")}-${new Date()
+    .toISOString()
+    .replace(/[-:T]/g, "-")}`;
   createBranchAndPR(branch, file);
 }
 
