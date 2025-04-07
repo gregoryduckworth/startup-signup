@@ -87,6 +87,7 @@ function runCommand(cmd) {
 function createBranchAndPR(branch, filePath) {
   runCommand(`git config --global user.name "autofix-bot"`);
   runCommand(`git config --global user.email "autofix@example.com"`);
+  runCommand(`git pull`);
   runCommand(`git checkout -b ${branch}`);
   runCommand(`git add ${filePath}`);
   runCommand(`git commit -m "fix: auto-fix for failing test"`);
@@ -115,7 +116,7 @@ async function main() {
 
   writeFile(file, fixedCode);
 
-  const branch = `autofix/${basename(file, ".ts")}`;
+  const branch = `autofix/${basename(file, ".ts")}-${new Date().toISOString()}`;
   createBranchAndPR(branch, file);
 }
 
