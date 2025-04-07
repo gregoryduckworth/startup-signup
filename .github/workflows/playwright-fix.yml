@@ -1,16 +1,14 @@
 name: Playwright Fix
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Playwright Tests
+    types:
+      - completed
 
 jobs:
-  test-and-fix:
+  analyze-and-fix:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,28 +23,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Download Test Results
+        uses: actions/download-artifact@v3
+        with:
+          name: playwright-results
 
-      - name: Install Dependencies
-        run: npm ci
-
-      - name: Start Docker Compose Services
-        run: docker compose up -d
-
-      - name: Wait for services to be ready
-        run: |
-          while ! curl --silent --output /dev/null --fail --max-time 300 http://localhost:3000; do
-            sleep 1
-          done
-          echo "Server is ready!"
-
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Run Playwright Tests
-        run: |
-          npx playwright test --reporter=json > results.json || echo "Tests completed with failures"
-
-      - name: Analyze and fix failing test
+      - name: Analyze and Fix Failing Tests
         run: node fixTests.js

@@ -1,0 +1,60 @@
+name: Playwright Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      CI: true
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Start Docker Compose Services
+        run: docker compose up -d
+
+      - name: Wait for services to be ready
+        run: |
+          while ! curl --silent --output /dev/null --fail --max-time 300 http://localhost:3000; do
+            sleep 1
+          done
+          echo "Server is ready!"
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright Tests
+        run: |
+          npx playwright test --reporter=json > results.json
+        continue-on-error: true
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: playwright-results
+          path: results.json
+
+      - name: Set Test Status
+        id: set-status
+        run: |
+          if [ $? -eq 0 ]; then
+            echo "tests_passed=true" >> $GITHUB_ENV
+          else
+            echo "tests_passed=false" >> $GITHUB_ENV
