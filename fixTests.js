@@ -137,13 +137,14 @@ function createBranchAndPR(branch, filePath, testTitle, fixedCode) {
     return;
   }
 
+  runCommand(`git add ${filePath}`);
+
   // Check for staged diff (changes added to git index)
   if (!checkDiff()) {
     console.log("No changes detected in the staged diff, skipping commit.");
     return;
   }
 
-  runCommand(`git add ${filePath}`);
   runCommand(`git commit -m "fix: auto-fix for failing test '${testTitle}'"`);
   if (!process.env.CI) {
     runCommand(
