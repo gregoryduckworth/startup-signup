@@ -64,7 +64,13 @@ Here is the full test file content:
 ${content}
 \`\`\`
 
-Please suggest a fix that would likely resolve the failure.
+Please focus on suggesting a fix that directly addresses the failure described above. The fix should:
+
+1. Correct only the issues causing the failure, without refactoring or changing unrelated code.
+2. Keep the overall structure and logic of the test intact unless required for the fix.
+3. Avoid introducing unnecessary code changes, such as re-importing libraries, modifying setup steps, or altering unrelated test cases.
+
+Please suggest a solution that would likely resolve the failure while maintaining the integrity of the existing test.
 `;
 
   const response = await openai.chat.completions.create({
@@ -98,6 +104,10 @@ function createBranchAndPR(branch, filePath, testTitle) {
     runCommand(`git config --global user.name "autofix-bot"`);
     runCommand(`git config --global user.email "autofix@example.com"`);
   }
+
+  runCommand(`git reset --hard`);
+  runCommand(`git clean -fd`);
+
   runCommand(`git pull`);
   runCommand(`git checkout -b ${branch}`);
   runCommand(`git add ${filePath}`);
