@@ -13,6 +13,7 @@ jobs:
       pull-requests: write
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
 
     steps:
       - name: Checkout Code
@@ -43,5 +44,3 @@ jobs:
 
       - name: Analyze and fix failing test
         run: node fixTests.js
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
