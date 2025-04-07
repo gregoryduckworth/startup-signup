@@ -64,13 +64,7 @@ Here is the full test file content:
 ${content}
 \`\`\`
 
-Please focus on suggesting a fix that directly addresses the failure described above. The fix should:
-
-1. Correct only the issues causing the failure, without refactoring or changing unrelated code.
-2. Keep the overall structure and logic of the test intact unless required for the fix.
-3. Avoid introducing unnecessary code changes, such as re-importing libraries, modifying setup steps, or altering unrelated test cases.
-
-Please suggest a solution that would likely resolve the failure while maintaining the integrity of the existing test.
+Please suggest a fix that would likely resolve the failure.
 `;
 
   const response = await openai.chat.completions.create({
@@ -99,16 +93,47 @@ function runCommand(cmd) {
   execSync(cmd, { stdio: "inherit" });
 }
 
-function createBranchAndPR(branch, filePath, testTitle) {
+function createBranchAndPR(branch, filePath, testTitle, fixedCode) {
   if (process.env.CI) {
     runCommand(`git config --global user.name "autofix-bot"`);
     runCommand(`git config --global user.email "autofix@example.com"`);
   }
+
+  // Ensure the working directory is clean before making changes
   runCommand(`git reset --hard`);
   runCommand(`git clean -fd`);
+
+  // Pull from the remote main branch to ensure we're up to date
   runCommand(`git checkout main`);
   runCommand(`git pull origin main`);
+
+  // Create and switch to the new branch, set it to track origin/main
   runCommand(`git checkout -b ${branch} origin/main`);
+
+  // Log and check if there are changes to commit
+  const status = execSync("git status -s").toString();
+  console.log("Git status:", status);
+
+  if (!status) {
+    console.log("No changes detected, skipping commit.");
+    return;
+  }
+
+  // Log the fixed code to ensure it's valid
+  console.log("Fixed code:", fixedCode);
+
+  // Write the fixed code to the file
+  writeFile(filePath, fixedCode);
+
+  // Check for diff
+  const diff = execSync("git diff --cached").toString();
+  console.log("Git diff:", diff);
+
+  if (!diff) {
+    console.log("No changes detected in the diff, skipping commit.");
+    return;
+  }
+
   runCommand(`git add ${filePath}`);
   runCommand(`git commit -m "fix: auto-fix for failing test '${testTitle}'"`);
   runCommand(
@@ -130,8 +155,6 @@ async function main() {
   if (!failures.length) {
     console.log("✅ No failing tests detected.");
     return;
-  } else {
-    console.log(`❌ Found ${failures.length} failing tests.`);
   }
 
   for (const { file, testTitle, error } of failures) {
@@ -141,12 +164,14 @@ async function main() {
     const suggestion = await askLLMToFix(currentCode, error, testTitle);
     const fixedCode = extractCodeBlock(suggestion);
 
-    writeFile(file, fixedCode);
+    // Log the fixed code before writing it
+    console.log("Fixed code before writing:", fixedCode);
 
+    // Create the branch and PR
     const branch = `autofix/${sanitize(basename(file, ".ts"))}-${sanitize(
       testTitle
     )}-${Date.now()}`;
-    createBranchAndPR(branch, file, testTitle);
+    createBranchAndPR(branch, file, testTitle, fixedCode);
   }
 }
 
