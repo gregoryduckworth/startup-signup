@@ -44,3 +44,5 @@ jobs:
 
       - name: Analyze and fix failing test
         run: node fixTests.js
+        env:
+          GH_TOKEN: ${{ github.token }}
