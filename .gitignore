@@ -3,6 +3,7 @@
 dist
 node_modules
 playwright-report
+results.json
 server/public
 test-results
 vite.config.ts.*
