@@ -37,7 +37,7 @@ jobs:
           echo "Server is ready!"
 
       - name: Install Playwright Browsers
-        run: npx playwright install --chromium
+        run: npx playwright install --with-deps chromium
 
       - name: Run Playwright Tests
         run: |
