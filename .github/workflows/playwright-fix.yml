@@ -1,0 +1,34 @@
+name: Playwright Fix
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test-and-fix:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install
+
+      - name: Run Playwright Tests
+        run: |
+          npx playwright test --reporter=json > results.json || echo "Tests completed with failures"
+
+      - name: Analyze and fix failing test
+        run: node fixTests.js
