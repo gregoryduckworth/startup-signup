@@ -99,22 +99,22 @@ function createBranchAndPR(branch, filePath, testTitle) {
   runCommand(`git reset --hard`);
   runCommand(`git checkout main`);
   runCommand(`git pull`);
-
   runCommand(`git checkout -b ${branch}`);
+
   runCommand(`git add ${filePath}`);
 
-  try {
-    // Check if there is anything to commit
-    const diff = execSync("git diff --cached").toString().trim();
-    if (!diff) {
-      console.log(
-        `⚠️ No changes detected for '${testTitle}'. Skipping commit & PR.`
-      );
-      runCommand(`git checkout main`);
-      runCommand(`git branch -D ${branch}`);
-      return;
-    }
+  // Check for staged diff AFTER adding the file
+  const diff = execSync(`git diff --cached ${filePath}`).toString().trim();
+  if (!diff) {
+    console.log(
+      `⚠️ No changes detected for '${testTitle}'. Skipping commit & PR.`
+    );
+    runCommand(`git checkout main`);
+    runCommand(`git branch -D ${branch}`);
+    return;
+  }
 
+  try {
     runCommand(`git commit -m "fix: auto-fix for failing test '${testTitle}'"`);
 
     runCommand(
