@@ -29,7 +29,7 @@ type WaitlistFormValues = z.infer<typeof waitlistFormSchema>;
 
 export default function WaitlistSection() {
   const { toast } = useToast();
-  
+
   // Initialize the form
   const form = useForm<WaitlistFormValues>({
     resolver: zodResolver(waitlistFormSchema),
@@ -49,7 +49,8 @@ export default function WaitlistSection() {
       const data = await response.json();
       toast({
         title: "Success!",
-        description: "You've been added to our waitlist! Check your email for a confirmation message.",
+        description:
+          "You've been added to our waitlist! Check your email for a confirmation message.",
         variant: "default",
       });
       form.reset();
@@ -68,15 +69,21 @@ export default function WaitlistSection() {
   };
 
   return (
-    <section id="waitlist" className="py-20 px-4 bg-gradient-to-br from-primary to-primary-700 text-white section-fade-in">
+    <section
+      id="waitlist"
+      className="py-20 px-4 bg-gradient-to-br from-primary to-primary-700 text-white section-fade-in"
+    >
       <div className="container mx-auto max-w-3xl">
         <div className="text-center mb-10">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">Join Our Exclusive Waitlist</h2>
+          <h2 className="text-3xl md:text-4xl font-bold mb-4">
+            Join Our Exclusive Waitlist
+          </h2>
           <p className="text-xl opacity-90 max-w-2xl mx-auto">
-            Be among the first to experience our platform when we launch. Early access members will receive special benefits and pricing.
+            Be among the first to experience our platform when we launch. Early
+            access members will receive special benefits and pricing.
           </p>
         </div>
-        
+
         <div className="bg-white rounded-xl p-8 shadow-xl max-w-2xl mx-auto">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -87,9 +94,9 @@ export default function WaitlistSection() {
                   <FormItem>
                     <FormLabel className="text-gray-700">Full Name</FormLabel>
                     <FormControl>
-                      <Input 
-                        placeholder="John Doe" 
-                        {...field} 
+                      <Input
+                        placeholder="John Doe"
+                        {...field}
                         className="text-gray-800 border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20"
                       />
                     </FormControl>
@@ -97,18 +104,20 @@ export default function WaitlistSection() {
                   </FormItem>
                 )}
               />
-              
+
               <FormField
                 control={form.control}
                 name="email"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-gray-700">Email Address</FormLabel>
+                    <FormLabel className="text-gray-700">
+                      Email Address
+                    </FormLabel>
                     <FormControl>
-                      <Input 
-                        placeholder="john.doe@example.com" 
-                        type="email" 
-                        {...field} 
+                      <Input
+                        placeholder="john.doe@example.com"
+                        type="email"
+                        {...field}
                         className="text-gray-800 border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20"
                       />
                     </FormControl>
@@ -116,17 +125,19 @@ export default function WaitlistSection() {
                   </FormItem>
                 )}
               />
-              
+
               <FormField
                 control={form.control}
                 name="company"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-gray-700">Company (Optional)</FormLabel>
+                    <FormLabel className="text-gray-700">
+                      Company (Optional)
+                    </FormLabel>
                     <FormControl>
-                      <Input 
-                        placeholder="Your Company" 
-                        {...field} 
+                      <Input
+                        placeholder="Your Company"
+                        {...field}
                         className="text-gray-800 border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20"
                       />
                     </FormControl>
@@ -134,9 +145,9 @@ export default function WaitlistSection() {
                   </FormItem>
                 )}
               />
-              
-              <Button 
-                type="submit" 
+
+              <Button
+                type="submit"
                 className="button-cta w-full py-6 bg-primary hover:bg-primary/90 text-white rounded-lg font-medium text-lg shadow-md transition-all"
                 disabled={mutation.isPending}
               >
@@ -149,11 +160,16 @@ export default function WaitlistSection() {
                   "Join Waitlist"
                 )}
               </Button>
-              
+
               <p className="text-center text-gray-500 text-sm">
-                By joining, you agree to our 
-                <a href="#" className="text-primary hover:underline ml-1">Terms of Service</a> and 
-                <a href="#" className="text-primary hover:underline ml-1">Privacy Policy</a>
+                By joining, you agree to our
+                <a href="#" className="text-primary hover:underline ml-1">
+                  Terms of Service
+                </a>{" "}
+                and
+                <a href="#" className="text-primary hover:underline ml-1">
+                  Privacy Policy
+                </a>
               </p>
             </form>
           </Form>
