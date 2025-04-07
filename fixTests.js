@@ -91,6 +91,8 @@ function runCommand(cmd) {
 }
 
 function createBranchAndPR(branch, filePath, testTitle) {
+  runCommand(`git config --global user.name "autofix-bot"`);
+  runCommand(`git config --global user.email "autofix@example.com"`);
   runCommand(`git reset --hard`);
   runCommand(`git checkout main`);
   runCommand(`git pull`);
