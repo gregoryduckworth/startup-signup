@@ -36,7 +36,7 @@ jobs:
 
       - name: Run Playwright Tests
         run: |
-          npx playwright test --reporter=json > results.json
+          npx playwright test --reporter=json > results.json || echo "Tests completed with failures"
 
       - name: Analyze and fix failing test
         run: node fixTests.js
