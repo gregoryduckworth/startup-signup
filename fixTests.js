@@ -4,7 +4,6 @@ import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import { OpenAI } from "openai";
 import dotenv from "dotenv";
-import { diffLines } from "diff";
 
 dotenv.config();
 
@@ -95,8 +94,10 @@ function runCommand(cmd) {
 }
 
 function createBranchAndPR(branch, filePath, testTitle) {
-  runCommand(`git config --global user.name "autofix-bot"`);
-  runCommand(`git config --global user.email "autofix@example.com"`);
+  if (process.env.CI) {
+    runCommand(`git config --global user.name "autofix-bot"`);
+    runCommand(`git config --global user.email "autofix@example.com"`);
+  }
   runCommand(`git reset --hard`);
   runCommand(`git checkout main`);
   runCommand(`git pull`);
@@ -104,24 +105,11 @@ function createBranchAndPR(branch, filePath, testTitle) {
   runCommand(`git add ${filePath}`);
 
   try {
-    const diff = execSync("git diff --cached").toString().trim();
-    if (!diff) {
-      console.log(
-        `⚠️ No changes detected for '${testTitle}'. Skipping commit & PR.`
-      );
-      runCommand(`git checkout main`);
-      runCommand(`git branch -D ${branch}`);
-      return;
-    }
-
     runCommand(`git commit -m "fix: auto-fix for failing test '${testTitle}'"`);
-
     runCommand(
       `git remote set-url origin https://x-access-token:${process.env.PAT_TOKEN}@github.com/${process.env.GITHUB_REPOSITORY}.git`
     );
-
     runCommand(`git push --set-upstream origin ${branch}`);
-
     runCommand(
       `gh pr create --title "🛠️ Auto-fix: ${testTitle}" --body "This PR auto-fixes the test '${testTitle}' using GPT-4." --base main`,
       {
@@ -147,23 +135,7 @@ async function main() {
 
     const currentCode = getFileContent(file);
     const suggestion = await askLLMToFix(currentCode, error, testTitle);
-
-    console.log(`🧠 GPT-4 Suggestion:\n${suggestion}`);
-
     const fixedCode = extractCodeBlock(suggestion);
-
-    console.log(`📄 Extracted Code Block:\n${fixedCode}`);
-
-    const differences = diffLines(currentCode, fixedCode);
-    console.log("📊 Code Diff:");
-    differences.forEach((part) => {
-      const color = part.added
-        ? "\x1b[32m"
-        : part.removed
-        ? "\x1b[31m"
-        : "\x1b[0m";
-      process.stdout.write(color + part.value + "\x1b[0m");
-    });
 
     writeFile(file, fixedCode);
 
