@@ -74,6 +74,14 @@ export class DatabaseStorage implements IStorage {
     );
     return result.rowCount !== null && result.rowCount > 0;
   }
+
+  async deleteWaitlistEntryByEmail(email: string): Promise<boolean> {
+    const result = await db.query(
+      "DELETE FROM waitlist_entries WHERE email = $1 RETURNING email",
+      [email]
+    );
+    return result.rowCount !== null && result.rowCount > 0;
+  }
 }
 
 export const storage = new DatabaseStorage();

@@ -1,10 +1,10 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
-  testDir: 'client/tests',
+  testDir: "client/tests",
   use: {
-    browserName: 'chromium',
+    browserName: "chromium",
     headless: true,
   },
-  reporter: 'html',
+  reporter: "dot",
 });

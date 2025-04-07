@@ -11,28 +11,20 @@ const openai = new OpenAI({
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-function loadFailures(filePath = "results.json") {
+function loadFailures(filePath = "playwright-fix-report.json") {
   const fullPath = join(__dirname, filePath);
   const data = JSON.parse(readFileSync(fullPath, "utf8"));
 
-  const testDir = data.config?.projects?.[0]?.testDir;
-  if (!testDir) throw new Error("❌ testDir not found in results.json config");
+  if (!data.length) return null;
 
-  for (const suite of data.suites || []) {
-    for (const spec of suite.specs || []) {
-      for (const test of spec.tests || []) {
-        if (test.results[0].status === "failed") {
-          return {
-            file: join(testDir, spec.file),
-            testTitle: spec.title,
-            error: test.results[0].error.message,
-          };
-        }
-      }
-    }
-  }
+  const firstFailure = data[0];
 
-  return null;
+  return {
+    file: join(process.cwd(), firstFailure.file),
+    testTitle: firstFailure.title,
+    error: firstFailure.error,
+    ariaSnapshot: firstFailure.ariaSnapshot,
+  };
 }
 
 function getFileContent(filePath) {
@@ -42,7 +34,7 @@ function getFileContent(filePath) {
   return readFileSync(fullPath, "utf8");
 }
 
-async function askLLMToFix(content, error, testTitle) {
+async function askLLMToFix(content, error, testTitle, ariaSnapshot = "") {
   const prompt = `
 The following Playwright test is failing:
 
@@ -55,7 +47,12 @@ Here is the full test file content:
 ${content}
 \`\`\`
 
-Please suggest a corrected version of this file that would likely fix the failure. Only make minimal and relevant changes.
+Here is the ARIA snapshot of the page at the time of failure:
+\`\`\`yaml
+${ariaSnapshot}
+\`\`\`
+
+Please suggest a fix for this test.
 `;
 
   const response = await openai.chat.completions.create({
