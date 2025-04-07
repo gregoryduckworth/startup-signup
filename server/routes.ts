@@ -73,28 +73,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Route to delete a waitlist entry by ID
-  app.delete("/api/waitlist/:id", async (req: Request, res: Response) => {
-    try {
-      const id = parseInt(req.params.id);
-
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "Invalid ID format" });
-      }
-
-      const deleted = await storage.deleteWaitlistEntry(id);
-
-      if (!deleted) {
-        return res.status(404).json({ message: "Waitlist entry not found" });
-      }
-
-      res.status(200).json({ message: "Waitlist entry deleted successfully" });
-    } catch (error) {
-      console.error("Error deleting waitlist entry:", error);
-      res.status(500).json({ message: "Failed to delete waitlist entry" });
-    }
-  });
-
   // Route to delete a waitlist entry by email
   app.delete(
     "/api/waitlist/email/:email",
@@ -106,12 +84,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ message: "Email is required" });
         }
 
-        const existingEntry = await storage.getWaitlistEntryByEmail(email);
-        if (!existingEntry) {
-          return res.status(404).json({ message: "Waitlist entry not found" });
-        }
-
-        const deleted = await storage.deleteWaitlistEntry(existingEntry.id);
+        const deleted = await storage.deleteWaitlistEntryByEmail(email);
         if (!deleted) {
           return res
             .status(500)

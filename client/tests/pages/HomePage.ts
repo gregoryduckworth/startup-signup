@@ -9,6 +9,7 @@ export class HomePage {
   readonly company: Locator;
   readonly submitButton: Locator;
   readonly toastMessage: Locator;
+  readonly toastMessageDismiss: Locator;
 
   constructor(page: Page) {
     this.page = page;
@@ -24,7 +25,12 @@ export class HomePage {
     this.submitButton = this.page
       .locator("#waitlist")
       .getByRole("button", { name: "Join Waitlist" });
-    this.toastMessage = this.page.getByRole("status");
+    this.toastMessage = this.page
+      .getByRole("region", { name: "Notifications (F8)" })
+      .getByRole("status");
+    this.toastMessageDismiss = this.page
+      .getByRole("region", { name: "Notifications (F8)" })
+      .getByRole("button");
   }
 
   async clickWaitListButton() {
@@ -40,5 +46,7 @@ export class HomePage {
 
   async assertToastMessage(expectedMessage: string) {
     await expect(this.toastMessage).toContainText(expectedMessage);
+    await this.toastMessageDismiss.click();
+    await expect(this.toastMessage).not.toBeVisible();
   }
 }
