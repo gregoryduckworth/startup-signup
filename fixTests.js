@@ -104,12 +104,11 @@ function createBranchAndPR(branch, filePath, testTitle) {
     runCommand(`git config --global user.name "autofix-bot"`);
     runCommand(`git config --global user.email "autofix@example.com"`);
   }
-
   runCommand(`git reset --hard`);
   runCommand(`git clean -fd`);
-
-  runCommand(`git pull`);
-  runCommand(`git checkout -b ${branch}`);
+  runCommand(`git checkout main`);
+  runCommand(`git pull origin main`);
+  runCommand(`git checkout -b ${branch} origin/main`);
   runCommand(`git add ${filePath}`);
   runCommand(`git commit -m "fix: auto-fix for failing test '${testTitle}'"`);
   runCommand(
