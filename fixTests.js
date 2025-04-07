@@ -99,7 +99,7 @@ function createBranchAndPR(branch, filePath) {
     `gh pr create --title "🛠️ Auto-fix for failing Playwright test" --body "This PR was generated automatically to fix a failing test using GPT-4." --base main`,
     {
       env: {
-        GH_TOKEN: process.env.PAT_TOKEN,
+        GH_TOKEN: process.env.GITHUB_TOKEN,
       },
     }
   );
