@@ -111,6 +111,14 @@ function createBranchAndPR(branch, filePath, testTitle) {
   runCommand(`git pull`);
   runCommand(`git checkout -b ${branch}`);
   runCommand(`git add ${filePath}`);
+
+  const status = execSync("git diff --cached --quiet", { stdio: "ignore" });
+
+  if (status === null) {
+    console.log("⏭️ No changes detected, skipping commit.");
+    return;
+  }
+
   runCommand(`git commit -m "fix: auto-fix for failing test '${testTitle}'"`);
   runCommand(
     `git remote set-url origin https://x-access-token:${process.env.PAT_TOKEN}@github.com/${process.env.GITHUB_REPOSITORY}.git`
