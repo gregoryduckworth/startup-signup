@@ -11,6 +11,10 @@ const openai = new OpenAI({
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+function sanitize(text) {
+  return text.replace(/[^\w\d_-]+/g, "_").slice(0, 80);
+}
+
 function loadFailures(filePath = "results.json") {
   const fullPath = join(__dirname, filePath);
   const data = JSON.parse(readFileSync(fullPath, "utf8"));
@@ -18,21 +22,23 @@ function loadFailures(filePath = "results.json") {
   const testDir = data.config?.projects?.[0]?.testDir;
   if (!testDir) throw new Error("❌ testDir not found in results.json config");
 
+  const failures = [];
+
   for (const suite of data.suites || []) {
     for (const spec of suite.specs || []) {
       for (const test of spec.tests || []) {
         if (test.results[0].status === "failed") {
-          return {
+          failures.push({
             file: join(testDir, spec.file),
             testTitle: spec.title,
             error: test.results[0].error.message,
-          };
+          });
         }
       }
     }
   }
 
-  return null;
+  return failures;
 }
 
 function getFileContent(filePath) {
@@ -55,7 +61,7 @@ Here is the full test file content:
 ${content}
 \`\`\`
 
-Please can you suggest a fix for this test that would likely resolve the failure.
+Please suggest a fix that would likely resolve the failure.
 `;
 
   const response = await openai.chat.completions.create({
@@ -84,19 +90,23 @@ function runCommand(cmd) {
   execSync(cmd, { stdio: "inherit" });
 }
 
-function createBranchAndPR(branch, filePath) {
-  runCommand(`git config --global user.name "autofix-bot"`);
-  runCommand(`git config --global user.email "autofix@example.com"`);
+function createBranchAndPR(branch, filePath, testTitle) {
+  runCommand(`git reset --hard`);
+  runCommand(`git checkout main`);
   runCommand(`git pull`);
+
   runCommand(`git checkout -b ${branch}`);
   runCommand(`git add ${filePath}`);
-  runCommand(`git commit -m "fix: auto-fix for failing test"`);
+  runCommand(`git commit -m "fix: auto-fix for failing test '${testTitle}'"`);
+
   runCommand(
     `git remote set-url origin https://x-access-token:${process.env.PAT_TOKEN}@github.com/${process.env.GITHUB_REPOSITORY}.git`
   );
+
   runCommand(`git push --set-upstream origin ${branch}`);
+
   runCommand(
-    `gh pr create --title "🛠️ Auto-fix for failing Playwright test" --body "This PR was generated automatically to fix a failing test using GPT-4." --base main`,
+    `gh pr create --title "🛠️ Auto-fix: ${testTitle}" --body "This PR auto-fixes the test '${testTitle}' using GPT-4." --base main`,
     {
       env: {
         GH_TOKEN: process.env.GITHUB_TOKEN,
@@ -106,25 +116,26 @@ function createBranchAndPR(branch, filePath) {
 }
 
 async function main() {
-  const failure = loadFailures();
-  if (!failure) {
+  const failures = loadFailures();
+  if (!failures.length) {
     console.log("✅ No failing tests detected.");
     return;
   }
 
-  const { file, testTitle, error } = failure;
+  for (const { file, testTitle, error } of failures) {
+    console.log(`🔍 Fixing test: ${testTitle} in ${file}`);
 
-  console.log(`🔍 Fixing test: ${testTitle} in ${file}`);
-  const currentCode = getFileContent(file);
-  const suggestion = await askLLMToFix(currentCode, error, testTitle);
-  const fixedCode = extractCodeBlock(suggestion);
+    const currentCode = getFileContent(file);
+    const suggestion = await askLLMToFix(currentCode, error, testTitle);
+    const fixedCode = extractCodeBlock(suggestion);
 
-  writeFile(file, fixedCode);
+    writeFile(file, fixedCode);
 
-  const branch = `autofix/${basename(file, ".ts")}-${new Date()
-    .toISOString()
-    .replace(/[-:T]/g, "-")}`;
-  createBranchAndPR(branch, file);
+    const branch = `autofix/${sanitize(basename(file, ".ts"))}-${sanitize(
+      testTitle
+    )}-${Date.now()}`;
+    createBranchAndPR(branch, file, testTitle);
+  }
 }
 
 main().catch((err) => {
