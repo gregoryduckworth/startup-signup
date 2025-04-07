@@ -90,7 +90,6 @@ function createBranchAndPR(branch, filePath) {
   runCommand(`git checkout -b ${branch}`);
   runCommand(`git add ${filePath}`);
   runCommand(`git commit -m "fix: auto-fix for failing test"`);
-  runCommand(`git pull origin ${branch} --rebase`);
   runCommand(
     `git remote set-url origin https://x-access-token:${process.env.PAT_TOKEN}@github.com/${process.env.GITHUB_REPOSITORY}.git`
   );
