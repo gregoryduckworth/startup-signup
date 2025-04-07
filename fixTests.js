@@ -115,7 +115,7 @@ async function main() {
 
   writeFile(file, fixedCode);
 
-  const branch = `autofix/${basename(file, ".ts")}`;
+  const branch = `autofix/${basename(file, ".ts")}-${new Date().toISOString()}`;
   createBranchAndPR(branch, file);
 }
 
