@@ -6,5 +6,5 @@ export default defineConfig({
     browserName: "chromium",
     headless: true,
   },
-  reporter: "dot",
+  reporter: "html",
 });
