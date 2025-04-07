@@ -1,16 +1,10 @@
-// modify the interface with any CRUD methods
-// you might need
-
-import { 
-  users, 
-  waitlistEntries,
-  type User, 
-  type InsertUser, 
-  type WaitlistEntry, 
-  type InsertWaitlistEntry
+import {
+  type User,
+  type InsertUser,
+  type WaitlistEntry,
+  type InsertWaitlistEntry,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -24,61 +18,61 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   async getUser(id: number): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    const result = await db.query("SELECT * FROM users WHERE id = $1", [id]);
+    return result.rows[0];
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    return user;
+    const result = await db.query("SELECT * FROM users WHERE username = $1", [
+      username,
+    ]);
+    return result.rows[0];
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db
-      .insert(users)
-      .values(insertUser)
-      .returning();
-    return user;
+  async createUser(user: InsertUser): Promise<User> {
+    const result = await db.query(
+      "INSERT INTO users (username, email, password_hash, created_at) VALUES ($1, $2, $3, NOW()) RETURNING *",
+      [user.username, user.email, user.passwordHash]
+    );
+    return result.rows[0];
   }
 
-  async createWaitlistEntry(insertEntry: InsertWaitlistEntry): Promise<WaitlistEntry> {
-    // Check if email already exists
-    const existingEntry = await this.getWaitlistEntryByEmail(insertEntry.email);
+  async createWaitlistEntry(
+    entry: InsertWaitlistEntry
+  ): Promise<WaitlistEntry> {
+    const existingEntry = await this.getWaitlistEntryByEmail(entry.email);
     if (existingEntry) {
       throw new Error("Email already registered on the waitlist");
     }
-    
-    const [entry] = await db
-      .insert(waitlistEntries)
-      .values({
-        ...insertEntry,
-        createdAt: new Date().toISOString()
-      })
-      .returning();
-    
-    return entry;
+
+    const result = await db.query(
+      "INSERT INTO waitlist_entries (full_name, email, company, created_at) VALUES ($1, $2, $3, NOW()) RETURNING *",
+      [entry.fullName, entry.email, entry.company]
+    );
+    return result.rows[0];
   }
 
-  async getWaitlistEntryByEmail(email: string): Promise<WaitlistEntry | undefined> {
-    const [entry] = await db
-      .select()
-      .from(waitlistEntries)
-      .where(eq(waitlistEntries.email, email));
-    
-    return entry;
+  async getWaitlistEntryByEmail(
+    email: string
+  ): Promise<WaitlistEntry | undefined> {
+    const result = await db.query(
+      "SELECT * FROM waitlist_entries WHERE email = $1",
+      [email]
+    );
+    return result.rows[0];
   }
 
   async getAllWaitlistEntries(): Promise<WaitlistEntry[]> {
-    return db.select().from(waitlistEntries);
+    const result = await db.query("SELECT * FROM waitlist_entries");
+    return result.rows;
   }
 
   async deleteWaitlistEntry(id: number): Promise<boolean> {
-    const result = await db
-      .delete(waitlistEntries)
-      .where(eq(waitlistEntries.id, id))
-      .returning({ id: waitlistEntries.id });
-    
-    return result.length > 0;
+    const result = await db.query(
+      "DELETE FROM waitlist_entries WHERE id = $1 RETURNING id",
+      [id]
+    );
+    return result.rowCount !== null && result.rowCount > 0;
   }
 }
 
