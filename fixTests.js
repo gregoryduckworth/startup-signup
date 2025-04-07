@@ -145,9 +145,11 @@ function createBranchAndPR(branch, filePath, testTitle, fixedCode) {
 
   runCommand(`git add ${filePath}`);
   runCommand(`git commit -m "fix: auto-fix for failing test '${testTitle}'"`);
-  runCommand(
-    `git remote set-url origin https://x-access-token:${process.env.PAT_TOKEN}@github.com/${process.env.GITHUB_REPOSITORY}.git`
-  );
+  if (!process.env.CI) {
+    runCommand(
+      `git remote set-url origin https://x-access-token:${process.env.PAT_TOKEN}@github.com/${process.env.GITHUB_REPOSITORY}.git`
+    );
+  }
   runCommand(`git push --set-upstream origin ${branch}`);
   runCommand(
     `gh pr create --title "🛠️ Auto-fix: ${testTitle}" --body "This PR auto-fixes the test '${testTitle}' using GPT-4." --base main`,
