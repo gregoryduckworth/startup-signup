@@ -130,6 +130,8 @@ async function main() {
   if (!failures.length) {
     console.log("✅ No failing tests detected.");
     return;
+  } else {
+    console.log(`❌ Found ${failures.length} failing tests.`);
   }
 
   for (const { file, testTitle, error } of failures) {
