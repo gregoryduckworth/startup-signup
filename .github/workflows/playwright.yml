@@ -49,11 +49,3 @@ jobs:
         with:
           name: playwright-results
           path: results.json
-
-      - name: Set Test Status
-        id: set-status
-        run: |
-          if [ $? -eq 0 ]; then
-            echo "tests_passed=true" >> $GITHUB_ENV
-          else
-            echo "tests_passed=false" >> $GITHUB_ENV
