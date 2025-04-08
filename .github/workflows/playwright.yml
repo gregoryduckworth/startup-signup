@@ -45,9 +45,13 @@ jobs:
           npx playwright test --reporter=json > results.json
         continue-on-error: true
 
-      - name: Upload Test Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-results
-          path: results.json
+      - name: Run Playwright Tests
+        run: |
+          npx playwright test --reporter=json > results.json
+        continue-on-error: true
+
+      - name: Analyse and Fix Failing Tests
+        run: |
+          export TRACE_DIR="./test-results"
+          export VIDEO_DIR="./test-results/videos"
+          node fixTests.js
