@@ -1,26 +1,6 @@
-import { test } from "@playwright/test";
-import { HomePage } from "./pages/HomePage";
+The issue is that the test is expecting a "Success" message when it should be expecting an error message. The error message is shown because the test is trying to sign up the same email twice, which is not allowed. Here is the diff to fix the test:
 
-const fullName = "John Doe";
-const email = "john@example.com";
-const company = "Example Inc.";
-
-test.beforeEach(async ({ page, request }) => {
-  await request.delete(`http://localhost:3000/api/waitlist/email/${email}`, {
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-  await page.goto("http://localhost:3000");
-});
-
-test("can sign up to the waitlist", async ({ page }) => {
-  const homePage = new HomePage(page);
-  await homePage.clickWaitListButton();
-  await homePage.fillOutWaitListForm(fullName, email, company);
-  await homePage.assertToastMessage("Success");
-});
-
+```diff
 test("should show an error on duplicate sign ups to the waitlist", async ({
   page,
 }) => {
@@ -30,5 +10,9 @@ test("should show an error on duplicate sign ups to the waitlist", async ({
   await homePage.assertToastMessage("Success");
   await homePage.clickWaitListButton();
   await homePage.fillOutWaitListForm(fullName, email, company);
-  await homePage.assertToastMessage("Success");
+- await homePage.assertToastMessage("Success");
++ await homePage.assertToastMessage("Error409: {\"message\":\"Email already registered on the waitlist\"}");
 });
+```
+
+This change will make the test expect the correct error message when trying to sign up the same email twice.
