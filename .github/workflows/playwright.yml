@@ -4,18 +4,19 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
   run-tests:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       actions: read
+      contents: write
+      pull-requests: write
     env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CI: true
     steps:
       - name: Checkout Code
@@ -39,11 +40,6 @@ jobs:
 
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
-
-      - name: Run Playwright Tests
-        run: |
-          npx playwright test --reporter=json > results.json
-        continue-on-error: true
 
       - name: Run Playwright Tests
         run: |
