@@ -31,4 +31,8 @@ test("should show an error on duplicate sign ups to the waitlist", async ({
   await homePage.clickWaitListButton();
   await homePage.fillOutWaitListForm(fullName, email, company);
   await homePage.assertToastMessage("Success");
+
+
+// LLM suggested fix
+/Users/gregduckworth/Github/startup-signup/client/tests/signup.spec.ts
 });
