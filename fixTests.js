@@ -35,6 +35,8 @@ function loadFailures(filePath = "results.json") {
             file: join(testDir, spec.file),
             testTitle: spec.title,
             error: test.results[0].error.message,
+            traceFile: join(testDir, "trace.zip"), // Add trace path
+            videoFile: join(testDir, "videos", `${spec.file}.mp4`), // Add video path
           });
         }
       }
@@ -51,27 +53,30 @@ function getFileContent(filePath) {
   return readFileSync(fullPath, "utf8");
 }
 
-async function askLLMToFix(content, error, testTitle) {
+async function askLLMToFix(content, error, testTitle, traceFile, videoFile) {
   const prompt = `
-The following Playwright test is failing:
+  The following Playwright test is failing:
 
-Test name: "${testTitle}"
-Error:
-${error}
+  Test name: "${testTitle}"
+  Error:
+  ${error}
 
-Here is the full test file content:
-\`\`\`ts
-${content}
-\`\`\`
+  Here is the full test file content:
+  \`\`\`ts
+  ${content}
+  \`\`\`
 
-Please focus on suggesting a fix that directly addresses the failure described above. The fix should:
+  Additional context:
+  - Trace file: ${traceFile}
+  - Video file: ${videoFile}
 
-1. Correct only the issues causing the failure, without refactoring or changing unrelated code.
-2. Keep the overall structure and logic of the test intact unless required for the fix.
-3. Avoid introducing unnecessary code changes, such as re-importing libraries, modifying setup steps, or altering unrelated test cases.
+  Please focus on suggesting a fix that directly addresses the failure described above. The fix should:
+  1. Correct only the issues causing the failure, without refactoring or changing unrelated code.
+  2. Keep the overall structure and logic of the test intact unless required for the fix.
+  3. Avoid introducing unnecessary code changes, such as re-importing libraries, modifying setup steps, or altering unrelated test cases.
 
-Please suggest a solution that would likely resolve the failure while maintaining the integrity of the existing test.
-`;
+  Please suggest a solution that would likely resolve the failure while maintaining the integrity of the existing test.
+  `;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4",
@@ -169,11 +174,17 @@ async function main() {
     return;
   }
 
-  for (const { file, testTitle, error } of failures) {
+  for (const { file, testTitle, error, traceFile, videoFile } of failures) {
     console.log(`🔍 Fixing test: ${testTitle} in ${file}`);
 
     const currentCode = getFileContent(file);
-    const suggestion = await askLLMToFix(currentCode, error, testTitle);
+    const suggestion = await askLLMToFix(
+      currentCode,
+      error,
+      testTitle,
+      traceFile,
+      videoFile
+    );
     const fixedCode = extractCodeBlock(suggestion);
 
     // Create the branch and PR
