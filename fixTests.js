@@ -70,14 +70,16 @@ async function askLLMToFix(content, error, testTitle, traceFile, videoFile) {
   - Trace file: ${traceFile}
   - Video file: ${videoFile}
 
-  Please focus on suggesting a fix that directly addresses the failure described above. The fix should:
-  1. Correct only the issues causing the failure, without refactoring or changing unrelated code.
-  2. Keep the overall structure and logic of the test intact unless required for the fix.
-  3. Avoid introducing unnecessary code changes, such as re-importing libraries, modifying setup steps, or altering unrelated test cases.
-
-  Please suggest a solution that would likely resolve the failure while maintaining the integrity of the existing test.
+  Instructions:
+  - Instead of providing the entire fixed code, please **only show the minimal changes** necessary in a **diff format** (e.g., with "+" and "-" markers for added or removed lines).
+  - Do not remove important setup code, imports, or necessary dependencies unless they are directly related to the failure.
+  - Focus only on fixing the issue causing the failure. Keep the surrounding code unchanged.
+  - Only modify selectors, actions, or expectations that are directly causing the test failure.
+  - You can however modify any related Page Object which could be causing the failure.
+  - Avoid any refactoring or structural changes unless absolutely necessary.
+  
+  Please provide a diff of the changes required to fix the failure.
   `;
-
   const response = await openai.chat.completions.create({
     model: "gpt-4",
     messages: [{ role: "user", content: prompt }],
