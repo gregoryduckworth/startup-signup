@@ -1,0 +1,745 @@
+require("dotenv").config(); // Make sure to load environment variables first
+
+const express = require("express");
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path"); // Use path module consistently
+const axios = require("axios");
+
+// --- Configuration ---
+const UPLOAD_DIR = path.join(__dirname, "uploads");
+const port = process.env.PORT || 3001; // Use environment variable for port if available
+
+const LLM_API_KEY = process.env.LLM_API_KEY;
+const LLM_ENDPOINT = process.env.LLM_ENDPOINT;
+const LLM_MODEL = process.env.LLM_MODEL || "gpt-3.5-turbo"; // Sensible default
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_OWNER = process.env.GITHUB_OWNER;
+const GITHUB_REPO = process.env.GITHUB_REPO;
+const REPO_ROOT_DIR = path.resolve(
+  __dirname,
+  process.env.REPO_ROOT_RELATIVE_PATH || ".."
+); // Define repo root relative to server.js location
+
+// --- Input Validation ---
+if (!LLM_API_KEY || !LLM_ENDPOINT) {
+  console.warn(`
+    *********************************************************************
+    WARNING: LLM_API_KEY or LLM_ENDPOINT environment variable not set.
+             LLM fix suggestions will be disabled.
+    *********************************************************************
+    `);
+}
+
+if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
+  console.warn(`
+    *********************************************************************
+    WARNING: GITHUB_TOKEN, GITHUB_OWNER, or GITHUB_REPO environment variable not set.
+             GitHub PR creation will be disabled.
+    *********************************************************************
+    `);
+}
+
+// Ensure upload directory exists
+if (!fs.existsSync(UPLOAD_DIR)) {
+  console.log(`Creating upload directory: ${UPLOAD_DIR}`);
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+// --- Multer Setup (File Uploads) ---
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, UPLOAD_DIR);
+  },
+  filename: function (req, file, cb) {
+    const uniquePrefix = Date.now() + "-" + Math.round(Math.random() * 1e6);
+    cb(null, uniquePrefix + "-" + file.originalname);
+  },
+});
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit per file
+}).fields([
+  { name: "trace", maxCount: 1 },
+  { name: "video", maxCount: 1 },
+  { name: "sourceCode", maxCount: 1 }, // We will read the original path directly too
+  { name: "screenshots", maxCount: 10 },
+]);
+
+// --- Helper Functions ---
+
+// Reads file content safely
+function readFileContent(filePath) {
+  if (!filePath) {
+    console.warn(`Cannot read file, path is null or undefined.`);
+    return null;
+  }
+  // Ensure the path exists before trying to read
+  if (!fs.existsSync(filePath)) {
+    console.warn(`Cannot read file, path does not exist: ${filePath}`);
+    return null;
+  }
+  try {
+    return fs.readFileSync(filePath, "utf-8");
+  } catch (error) {
+    console.error(`Error reading file ${filePath}:`, error);
+    return null;
+  }
+}
+
+// Extracts code snippet and imports from test file
+function getCodeContext(testFilePath, lineNumber, contextLines = 5) {
+  const fileContent = readFileContent(testFilePath);
+  if (!fileContent) {
+    return {
+      imports: "Could not read test file.",
+      snippet: "Could not read test file.",
+    };
+  }
+
+  const lines = fileContent.split("\n");
+  // Improved regex to handle various import styles (including types) better
+  const imports = lines
+    .filter((line) =>
+      /^\s*import(\s+type)?\s+.*\s+from\s+['"].*['"]/.test(line)
+    )
+    .join("\n");
+
+  let snippet = "Could not generate snippet.";
+  try {
+    const targetLine = parseInt(lineNumber, 10) - 1; // 0-indexed
+
+    if (!isNaN(targetLine) && targetLine >= 0 && targetLine < lines.length) {
+      const startLine = Math.max(0, targetLine - contextLines);
+      const endLine = Math.min(lines.length, targetLine + contextLines + 1);
+      const snippetLines = lines.slice(startLine, endLine);
+
+      snippet = snippetLines
+        .map((line, index) => {
+          const currentLineNumber = startLine + index + 1;
+          const prefix =
+            currentLineNumber === targetLine + 1
+              ? `>${currentLineNumber}`.padStart(5)
+              : `${currentLineNumber}`.padStart(5);
+          return `${prefix}: ${line}`;
+        })
+        .join("\n");
+    } else if (!isNaN(targetLine)) {
+      snippet = `Invalid line number (${lineNumber}) for file with ${lines.length} lines.`;
+    } else {
+      snippet = `Invalid line number provided (${lineNumber}). Cannot generate snippet.`;
+    }
+  } catch (error) {
+    console.error(`Error generating snippet for ${testFilePath}:`, error);
+    snippet = `Error generating code snippet: ${error.message}`;
+  }
+
+  return { imports, snippet };
+}
+
+// Finds relative imports, resolves paths, and reads file content
+function getImportedFilesContext(testFilePath, testFileContent) {
+  if (!testFilePath || !testFileContent) return {};
+
+  const importRegex = /import\s+(type\s+)?.*\s+from\s+['"](\.\.?\/[^"']*)['"]/g; // Capture relative paths only
+  let match;
+  const importedFiles = {};
+  const testFileDir = path.dirname(testFilePath);
+
+  console.log(`\n--- Analyzing Imports in: ${testFilePath} ---`);
+  while ((match = importRegex.exec(testFileContent)) !== null) {
+    const relativePath = match[2]; // Group 2 captures the path
+    // Allow common code extensions
+    const allowedExtensions = [
+      ".ts",
+      ".js",
+      ".page",
+      ".component",
+      ".util",
+      ".helper",
+    ]; // Add more if needed
+    const seemsLikeCode =
+      allowedExtensions.some((ext) => relativePath.endsWith(ext)) ||
+      !relativePath.includes("."); // Allow extensionless imports
+
+    if (!seemsLikeCode) {
+      console.log(`  Skipping likely non-code import: ${relativePath}`);
+      continue;
+    }
+
+    try {
+      let resolvedPath = null;
+      const potentialPaths = [
+        relativePath,
+        relativePath + ".ts",
+        relativePath + ".js",
+        path.join(relativePath, "index.ts"), // Handle directory imports
+        path.join(relativePath, "index.js"),
+      ];
+
+      for (const p of potentialPaths) {
+        const absPath = path.resolve(testFileDir, p);
+        if (fs.existsSync(absPath) && fs.statSync(absPath).isFile()) {
+          resolvedPath = absPath;
+          break;
+        }
+      }
+
+      if (resolvedPath) {
+        console.log(
+          `  Found relevant import: ${relativePath} -> ${resolvedPath}`
+        );
+        const content = readFileContent(resolvedPath);
+        if (content) {
+          // Truncate large files to avoid exceeding token limits
+          const maxChars = 10000; // Adjust token limit buffer as needed
+          importedFiles[relativePath] =
+            content.length > maxChars
+              ? content.substring(0, maxChars) + "\n... [TRUNCATED]"
+              : content;
+          console.log(
+            `    -> Read content (length: ${content.length}, added to context)`
+          );
+        } else {
+          console.log(`    -> Failed to read content`);
+        }
+      } else {
+        console.log(
+          `    -> Could not resolve import or file not found for: ${relativePath}`
+        );
+      }
+    } catch (error) {
+      console.error(`  Error processing import ${relativePath}:`, error);
+    }
+  }
+  console.log(`--- Finished analyzing imports ---`);
+  return importedFiles;
+}
+
+// Function to call LLM API
+async function getLlmSuggestion(prompt) {
+  if (!LLM_API_KEY || !LLM_ENDPOINT) {
+    return {
+      suggestion:
+        "LLM integration is disabled (API Key or Endpoint not configured).",
+      fixBlocks: [],
+    };
+  }
+
+  console.log("\n--- Sending prompt to LLM ---");
+  // console.log("Prompt:", prompt); // Uncomment to see the full prompt
+
+  try {
+    const response = await axios.post(
+      LLM_ENDPOINT,
+      {
+        model: LLM_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert Playwright test automation engineer debugging a failing test.
+Analyze the provided information (error, test code, imported files).
+Provide a specific code fix.
+Format your response ONLY using markdown code blocks.
+If fixing the test file, use a block like this:
+\`\`\`typescript path/to/test/file.spec.ts
+// corrected code here
+\`\`\`
+If fixing an imported file (e.g., a Page Object), use a block like this:
+\`\`\`typescript path/to/imported/file.page.ts
+// corrected code here
+\`\`\`
+Ensure the file path in the code block header is the RELATIVE path from the project root. Include ONLY the corrected code snippet(s) within the markdown blocks. NO other text, explanation, or preamble outside the code blocks.`,
+          },
+          {
+            role: "user",
+            content: prompt, // The detailed prompt constructed below
+          },
+        ],
+        temperature: 0.3, // Lower temperature for more deterministic code fixes
+        max_tokens: 1500, // Allow more tokens for potentially larger fixes/context
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${LLM_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 120000, // 120 second timeout
+      }
+    );
+
+    console.log("--- LLM Response Received ---");
+    let rawSuggestion = "Could not extract suggestion from LLM response.";
+    // Adjust extraction based on your LLM's response structure (e.g., OpenAI)
+    if (response.data?.choices?.[0]?.message?.content) {
+      rawSuggestion = response.data.choices[0].message.content;
+    } else if (response.data?.choices?.[0]?.text) {
+      rawSuggestion = response.data.choices[0].text;
+    }
+
+    // --- Parse the LLM response for code blocks ---
+    const fixBlocks = [];
+    const codeBlockRegex = /```(\w+)\s+([\w\/\.\-\_]+)\s*([\s\S]*?)```/g; // Capture lang, path, code
+    let match;
+    while ((match = codeBlockRegex.exec(rawSuggestion)) !== null) {
+      const language = match[1].trim();
+      const filePath = match[2].trim(); // Relative path from LLM
+      const code = match[3].trim();
+      if (code) {
+        // Only add if code exists
+        fixBlocks.push({ language, filePath, code });
+        console.log(`  Extracted fix block for: ${filePath}`);
+      }
+    }
+
+    if (fixBlocks.length === 0) {
+      console.log("  LLM response did not contain formatted code blocks.");
+      // Return the raw response if no blocks found, maybe it's just text explanation
+      return { suggestion: rawSuggestion.trim(), fixBlocks: [] };
+    }
+
+    return { suggestion: rawSuggestion.trim(), fixBlocks }; // Return both raw and parsed
+  } catch (error) {
+    console.error("--- LLM API Call Failed ---");
+    if (axios.isAxiosError(error)) {
+      console.error("Axios Error:", error.message);
+      console.error("Status:", error.response?.status);
+      console.error("Data:", JSON.stringify(error.response?.data, null, 2));
+      return {
+        suggestion: `LLM API Error: ${error.message} (Status: ${error.response?.status})`,
+        fixBlocks: [],
+      };
+    } else {
+      console.error("Unknown Error during LLM call:", error);
+      return { suggestion: `LLM Call Failed: ${error.message}`, fixBlocks: [] };
+    }
+  }
+}
+
+// Simple placeholder patch function (replace with diff-match-patch later if needed)
+// This attempts to replace the whole file content for simplicity with Octokit.
+// More robust patching would require comparing lines or using a diff library.
+function preparePatchedContent(originalContent, fixBlockCode) {
+  // For this approach, we assume the LLM provides the *complete* fixed code snippet
+  // for the relevant section, or potentially the whole fixed file content if instructed.
+  // A truly robust solution needs line-by-line diffing.
+  // This placeholder just returns the LLM's code block directly.
+  // The GitHub update function will replace the entire file.
+  return fixBlockCode;
+}
+
+// --- GitHub PR Creation (Modified to commit only changes) ---
+async function createGitHubPR(testTitle, fixBlocks) {
+  if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
+    console.log("GitHub credentials not set. Skipping PR creation.");
+    return "GitHub credentials not configured.";
+  }
+  if (!fixBlocks || fixBlocks.length === 0) {
+    console.log(
+      "No valid code fix blocks provided by LLM. Skipping PR creation."
+    );
+    return "No PR created - LLM did not provide code blocks.";
+  }
+
+  const { Octokit } = await import("@octokit/rest");
+  const octokit = new Octokit({ auth: GITHUB_TOKEN });
+
+  try {
+    console.log(`\n--- Attempting GitHub PR Creation for: ${testTitle} ---`);
+    // Get default branch
+    const { data: repoData } = await octokit.repos.get({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+    });
+    const default_branch = repoData.default_branch;
+    console.log(`  Default branch: ${default_branch}`);
+
+    // Get SHA of latest commit on default branch
+    const { data: refData } = await octokit.git.getRef({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      ref: `heads/${default_branch}`,
+    });
+    const latestSha = refData.object.sha;
+    console.log(`  Latest SHA on ${default_branch}: ${latestSha}`);
+
+    // Create a new branch
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[:\-T\.]/g, "")
+      .slice(0, 12); // Shorter timestamp
+    // Sanitize title for branch name
+    const sanitizedTitle = testTitle
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .substring(0, 30);
+    const newBranchName = `fix/llm-${sanitizedTitle}-${timestamp}`;
+
+    console.log(`  Creating new branch: ${newBranchName}`);
+    await octokit.git.createRef({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      ref: `refs/heads/${newBranchName}`,
+      sha: latestSha,
+    });
+
+    const changesMade = []; // Keep track of files actually changed
+
+    // Process each fix block provided by the LLM
+    for (const block of fixBlocks) {
+      const githubPath = block.filePath; // Assuming LLM provides relative path from repo root
+      const newContent = block.code;
+
+      console.log(`  Processing fix for file: ${githubPath}`);
+
+      let currentSha = null;
+      let originalContent = "";
+
+      // Get current file content and SHA
+      try {
+        const { data: fileData } = await octokit.repos.getContent({
+          owner: GITHUB_OWNER,
+          repo: GITHUB_REPO,
+          path: githubPath,
+          ref: newBranchName, // Get from the new branch (initially same as default)
+        });
+        currentSha = fileData.sha;
+        originalContent = Buffer.from(fileData.content, "base64").toString(
+          "utf-8"
+        );
+        console.log(`    -> Fetched current SHA: ${currentSha}`);
+      } catch (error) {
+        if (error.status === 404) {
+          console.log(
+            `    -> File not found at path: ${githubPath}. Assuming new file creation.`
+          );
+          originalContent = ""; // Treat as empty for comparison if creating new
+          currentSha = null; // No SHA for new files
+        } else {
+          console.error(
+            `    -> Error fetching file content for ${githubPath}:`,
+            error.message
+          );
+          throw error; // Rethrow other errors
+        }
+      }
+
+      // !!! IMPORTANT: Compare content !!!
+      // Normalize line endings for comparison
+      const normalizedOriginal = originalContent.replace(/\r\n/g, "\n").trim();
+      const normalizedNew = newContent.replace(/\r\n/g, "\n").trim();
+
+      if (normalizedOriginal === normalizedNew) {
+        console.log(
+          `    -> No actual changes detected for ${githubPath}. Skipping commit for this file.`
+        );
+        continue; // Skip to the next block if no change
+      } else {
+        console.log(`    -> Changes detected. Proceeding with commit.`);
+        changesMade.push(githubPath);
+      }
+
+      // Update the file in the new branch
+      // Use createOrUpdateFileContents which handles both creation and update
+      const commitMessage = currentSha
+        ? `Fix: Apply LLM patch to ${path.basename(githubPath)}`
+        : `Feat: Create ${path.basename(githubPath)} with LLM suggestion`;
+
+      await octokit.repos.createOrUpdateFileContents({
+        owner: GITHUB_OWNER,
+        repo: GITHUB_REPO,
+        path: githubPath,
+        message: commitMessage,
+        content: Buffer.from(newContent).toString("base64"),
+        sha: currentSha, // Provide SHA for updates, null/undefined for creates
+        branch: newBranchName,
+      });
+      console.log(
+        `    -> Committed changes for ${githubPath} to branch ${newBranchName}`
+      );
+    } // End loop through fixBlocks
+
+    // Only create PR if actual changes were committed
+    if (changesMade.length === 0) {
+      console.log(
+        "No files were actually changed by the LLM suggestions. Deleting branch and skipping PR creation."
+      );
+      // Optional: Clean up the created branch if no changes were made
+      try {
+        await octokit.git.deleteRef({
+          owner: GITHUB_OWNER,
+          repo: GITHUB_REPO,
+          ref: `heads/${newBranchName}`,
+        });
+        console.log(`  Deleted unused branch: ${newBranchName}`);
+      } catch (deleteError) {
+        console.error(
+          `  Failed to delete unused branch ${newBranchName}:`,
+          deleteError.message
+        );
+      }
+      return "No PR created - LLM suggestions did not change file content.";
+    }
+
+    // Create a PR
+    console.log(
+      `  Creating Pull Request from ${newBranchName} to ${default_branch}`
+    );
+    const prTitle = `🤖 Fix: Apply LLM Suggestions for "${testTitle}"`;
+    const prBody = `This Pull Request applies automated fixes suggested by an LLM for failures detected in the test: **${testTitle}**.
+
+**Files Modified:**
+${changesMade.map((f) => `- \`${f}\``).join("\n")}
+
+*Please review these changes carefully before merging.*`;
+
+    const { data: prData } = await octokit.pulls.create({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      title: prTitle,
+      head: newBranchName,
+      base: default_branch,
+      body: prBody,
+    });
+
+    console.log(`--- GitHub PR Successfully Created: ${prData.html_url} ---`);
+    return prData.html_url;
+  } catch (error) {
+    console.error("--- GitHub PR Creation Failed ---");
+    console.error("Error:", error.status, error.message);
+    // Log request details if available (useful for debugging Octokit errors)
+    if (error.request) {
+      console.error("Request:", error.request.method, error.request.url);
+    }
+    if (error.response && error.response.data) {
+      console.error(
+        "Response Data:",
+        JSON.stringify(error.response.data, null, 2)
+      );
+    }
+    // Attempt to clean up branch if PR creation failed mid-way
+    if (newBranchName) {
+      try {
+        await octokit.git.deleteRef({
+          owner: GITHUB_OWNER,
+          repo: GITHUB_REPO,
+          ref: `heads/${newBranchName}`,
+        });
+        console.log(`  Cleaned up failed branch: ${newBranchName}`);
+      } catch (cleanupError) {
+        console.error(
+          `  Failed to clean up branch ${newBranchName} after error:`,
+          cleanupError.message
+        );
+      }
+    }
+    return `GitHub PR creation failed: ${error.message}`;
+  }
+}
+
+// --- API Endpoint (/analyze) ---
+const app = express();
+app.post("/analyze", (req, res) => {
+  console.log("\n--- Received request to /analyze ---");
+
+  upload(req, res, async function (err) {
+    // Make handler async
+    if (err) {
+      console.error("Upload Error:", err);
+      const errorType =
+        err instanceof multer.MulterError
+          ? "Multer Error"
+          : "Unknown Upload Error";
+      return res.status(500).json({ error: `${errorType}: ${err.message}` });
+    }
+
+    // --- Extract Data ---
+    const {
+      testTitle,
+      status,
+      testFile, // This should be the absolute path on the server where the test ran
+      lineNumber,
+      error: errorJsonString,
+    } = req.body;
+
+    if (!testFile) {
+      console.error("Error: testFile path was not received from the reporter.");
+      return res
+        .status(400)
+        .json({ error: "Missing testFile path in request body." });
+    }
+
+    // Use the absolute path received from the reporter
+    const originalTestFilePath = testFile;
+    console.log("Test Title:", testTitle);
+    console.log("Status:", status);
+    console.log("Source File:", originalTestFilePath, `(Line: ${lineNumber})`);
+
+    // --- Read Test File Content and Extract Context ---
+    const testFileContent = readFileContent(originalTestFilePath);
+    const { imports: testFileImports, snippet: codeSnippet } = getCodeContext(
+      originalTestFilePath,
+      lineNumber
+    );
+    const importedFilesContext = getImportedFilesContext(
+      originalTestFilePath,
+      testFileContent
+    );
+
+    // --- Basic Analysis ---
+    let analysis = { suggestions: [] };
+    let errorData = {};
+    try {
+      errorData = JSON.parse(errorJsonString || "{}");
+      console.log("\n--- Error Details ---");
+      console.log("Message:", errorData.message);
+
+      // Simple Heuristics
+      if (
+        errorData.message?.includes("Timeout") &&
+        errorData.message?.includes("waiting for selector")
+      ) {
+        analysis.suggestions.push("Heuristic: Potential Selector Timeout.");
+      } else if (errorData.message?.includes("expect(")) {
+        analysis.suggestions.push("Heuristic: Potential Assertion Failure.");
+      } else if (
+        errorData.message?.includes("element is not visible") ||
+        errorData.message?.includes("element is not stable")
+      ) {
+        analysis.suggestions.push(
+          "Heuristic: Potential Element Visibility/Stability Issue."
+        );
+      }
+      console.log("Heuristics:", analysis.suggestions.join(" "));
+    } catch (parseError) {
+      console.error("Error parsing error JSON:", parseError);
+    }
+
+    // --- Build Enhanced LLM Prompt ---
+    let importedFilesContentString = "";
+    for (const [importPath, content] of Object.entries(importedFilesContext)) {
+      importedFilesContentString += `\n\n--- Content of imported file: ${importPath} ---\n`;
+      importedFilesContentString += "```typescript\n"; // Assume TS/JS
+      importedFilesContentString += content;
+      importedFilesContentString += "\n```";
+    }
+    if (Object.keys(importedFilesContext).length === 0) {
+      importedFilesContentString =
+        "\n\n(No relevant relative imports found or read.)";
+    }
+
+    // Calculate relative path for the prompt (assuming REPO_ROOT_DIR is set correctly)
+    let relativeTestFilePathPrompt = originalTestFilePath;
+    try {
+      relativeTestFilePathPrompt = path
+        .relative(REPO_ROOT_DIR, originalTestFilePath)
+        .replace(/\\/g, "/");
+    } catch (e) {
+      console.warn(
+        "Could not calculate relative path for prompt, using absolute."
+      );
+    }
+
+    const llmPrompt = `
+Playwright Test Failure Analysis:
+
+**Test:** ${testTitle || "N/A"}
+**File:** ${relativeTestFilePathPrompt}
+**Failing Line:** ${lineNumber || "N/A"}
+**Status:** ${status || "N/A"}
+
+**Error Message:**
+\`\`\`
+${errorData.message || "N/A"}
+\`\`\`
+
+**Stack Trace Snippet:**
+\`\`\`
+${(errorData.stack || "N/A").substring(0, 700)}...
+\`\`\`
+
+**Server Heuristics:**
+${analysis.suggestions.length > 0 ? analysis.suggestions.join("\n") : "None"}
+
+**Test File Imports:**
+\`\`\`typescript
+${testFileImports || "(Could not extract imports)"}
+\`\`\`
+
+**Code Snippet Around Failing Line (${lineNumber}) in ${relativeTestFilePathPrompt}:**
+\`\`\`typescript
+${codeSnippet}
+\`\`\`
+${importedFilesContentString}
+
+**Task:**
+Analyze this Playwright test failure using all the provided context. Explain the likely root cause and provide corrected code snippets formatted ONLY in markdown blocks as requested in the system prompt. Ensure file paths in the code block headers are RELATIVE to the project root. Include fixes for the test file (${relativeTestFilePathPrompt}) and any relevant imported files. Provide ONLY the code blocks, no extra text.
+`;
+
+    // --- Call LLM ---
+    const { suggestion: llmSuggestion, fixBlocks } = await getLlmSuggestion(
+      llmPrompt
+    );
+
+    console.log("\n--- LLM Suggestion (Raw) ---");
+    console.log(llmSuggestion); // Log raw suggestion for debugging
+    console.log("\n--- Extracted Fix Blocks ---");
+    console.log(fixBlocks);
+    console.log("--- Analysis complete ---");
+
+    // --- Create GitHub PR ---
+    let prUrl = "PR creation skipped or failed.";
+    if (
+      fixBlocks &&
+      fixBlocks.length > 0 &&
+      GITHUB_TOKEN &&
+      GITHUB_OWNER &&
+      GITHUB_REPO
+    ) {
+      prUrl = await createGitHubPR(testTitle, fixBlocks);
+    } else if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
+      prUrl = "PR creation skipped - GitHub credentials not configured.";
+    } else {
+      prUrl = "PR creation skipped - LLM did not provide valid fix blocks.";
+    }
+    console.log(`PR URL / Status: ${prUrl}`);
+
+    // --- Respond to Client ---
+    res.status(200).json({
+      message: "Analysis data received and processed.",
+      receivedData: req.body,
+      files: req.files, // Server paths to uploaded artifacts
+      analysis: analysis,
+      llmSuggestion: llmSuggestion, // Send raw suggestion back
+      llmFixBlocks: fixBlocks, // Send parsed blocks back
+      prUrl: prUrl,
+    });
+  });
+});
+
+// --- Start Server ---
+app.listen(port, () => {
+  console.log(
+    `Playwright Analysis Server listening at http://localhost:${port}`
+  );
+  console.log(`Uploaded files will be saved to: ${UPLOAD_DIR}`);
+  console.log(`Expected Repo Root: ${REPO_ROOT_DIR}`);
+  if (!LLM_API_KEY || !LLM_ENDPOINT) {
+    console.log(
+      "WARNING: LLM Fix suggestions disabled due to missing environment variables."
+    );
+  } else {
+    console.log(
+      `LLM Integration Enabled (Model: ${LLM_MODEL}, Endpoint: ${LLM_ENDPOINT})`
+    );
+  }
+  if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
+    console.log(
+      "WARNING: GitHub PR creation disabled due to missing environment variables."
+    );
+  } else {
+    console.log(
+      `GitHub Integration Enabled (Repo: ${GITHUB_OWNER}/${GITHUB_REPO})`
+    );
+  }
+});

@@ -1,3 +1,5 @@
+// custom-reporter.ts (Temporary Version for Testing - NO TRACE/VIDEO)
+
 import type {
   Reporter,
   FullConfig,
@@ -10,205 +12,301 @@ import type {
 import fs from "fs";
 import path from "path";
 import axios from "axios";
-import FormData from "form-data";
+import FormData from "form-data"; // Ensure you have form-data installed
 
 class AnalysisReporter implements Reporter {
-  private analysisServerUrl = "http://localhost:3001/analyze"; // Your server endpoint
-  private outputDir: string = "test-results"; // Default, will be updated from config
+  // Ensure the URL matches your server endpoint EXACTLY (e.g., /analyze vs /analyse)
+  private analysisServerUrl =
+    process.env.ANALYSIS_SERVER_URL || "http://localhost:3001/analyze";
+  private outputDir: string = "test-results";
 
   onBegin(config: FullConfig, suite: Suite): void {
-    // Store the configured output directory
+    // Safer way to get outputDir if multiple projects exist
     this.outputDir = config.rootDir
-      ? path.resolve(config.rootDir, config.projects[0].outputDir)
-      : config.projects[0].outputDir;
-    console.log(`Analysis Reporter: Output directory set to ${this.outputDir}`);
+      ? path.resolve(
+          config.rootDir,
+          config.projects[0]?.outputDir || "test-results"
+        )
+      : config.projects[0]?.outputDir || "test-results";
     console.log(
-      `Analysis Reporter: Sending failed test data to ${this.analysisServerUrl}`
+      `[Analysis Reporter] Output directory set to ${this.outputDir}`
+    );
+    console.log(
+      `[Analysis Reporter] Sending failed test data to ${this.analysisServerUrl}`
     );
   }
 
   onTestEnd(test: TestCase, result: TestResult): void | Promise<void> {
-    // Send data only on failure or timeout
     if (result.status === "failed" || result.status === "timedOut") {
       console.log(
-        `[Analysis Reporter] Test Failed: ${test.title}. Status: ${result.status}. Preparing data...`
+        `>>> [Analysis Reporter] TEST FAILED: ${test.title}. Preparing data...`
+      );
+      console.log(
+        `[Analysis Reporter] Calling sendAnalysisData for "${test.title}"`
       );
       this.sendAnalysisData(test, result).catch((err) => {
         console.error(
-          `[Analysis Reporter] ERROR: Failed to send data for "${test.title}" to analysis server:`,
-          err.message || err
+          `[Analysis Reporter] UNHANDLED ERROR during sendAnalysisData for "${test.title}":`,
+          err?.message || err,
+          err?.stack
         );
       });
-    } else {
-      // Optional: Log skipped or passed tests if needed
-      // console.log(`[Analysis Reporter] Test ${result.status}: ${test.title}`);
-    }
-  }
-
-  onEnd(result: FullResult): void | Promise<void> {
-    console.log(
-      `[Analysis Reporter] Test run finished with status: ${result.status}`
-    );
-  }
-
-  // Helper function to safely get artifact paths
-  private async getArtifactPath(
-    artifact: any | undefined
-  ): Promise<string | null> {
-    if (!artifact) return null;
-    try {
-      const artifactPath = await artifact.path();
-      if (artifactPath && fs.existsSync(artifactPath)) {
-        return artifactPath;
-      }
-    } catch (e) {
-      // path() might throw if the artifact wasn't saved (e.g., if test passed before trace finished)
-      console.warn(
-        `[Analysis Reporter] Warning: Could not get path for artifact: ${e.message}`
+      console.log(
+        `[Analysis Reporter] sendAnalysisData call initiated for "${test.title}"`
       );
     }
-    return null;
   }
 
   async sendAnalysisData(test: TestCase, result: TestResult) {
+    console.log(
+      `[Analysis Reporter] Inside sendAnalysisData for "${test.title}"`
+    );
     const formData = new FormData();
+    let fileAppendError = false;
 
-    // --- Basic Info ---
-    formData.append("testTitle", test.title);
-    formData.append("testFile", test.location.file);
-    formData.append("lineNumber", test.location.line.toString());
-    formData.append("status", result.status);
-    formData.append("duration", result.duration.toString());
-    formData.append("retries", result.retry.toString());
-
-    // --- Error Details ---
-    if (result.error) {
-      formData.append(
-        "error",
-        JSON.stringify(
-          {
-            message: result.error.message || "No message",
-            stack: result.error.stack || "No stack trace",
-            value: result.error.value, // Can sometimes contain useful context
-          },
-          null,
-          2
-        )
-      ); // Pretty print JSON
-    } else {
-      formData.append(
-        "error",
-        JSON.stringify({ message: "No error object reported" })
-      );
-    }
-
-    // --- Console Logs ---
-    // Note: Capturing full stdout/stderr might require specific runner configuration or adjustments
-    formData.append(
-      "stdout",
-      result.stdout.map((b) => b.toString()).join("\n")
-    );
-    formData.append(
-      "stderr",
-      result.stderr.map((b) => b.toString()).join("\n")
-    );
-
-    // --- Artifacts ---
-    let tracePath: string | null = null;
-    let videoPath: string | null = null;
-    let screenshotPaths: string[] = [];
-
-    // Iterate through attachments to find trace, video, screenshots
-    for (const attachment of result.attachments) {
-      if (
-        attachment.name === "trace" &&
-        attachment.path &&
-        fs.existsSync(attachment.path)
-      ) {
-        tracePath = attachment.path;
-        console.log(`[Analysis Reporter] Found trace: ${tracePath}`);
-        formData.append("trace", fs.createReadStream(tracePath), {
-          filename: path.basename(tracePath),
-          contentType: "application/zip",
-        });
-      } else if (
-        attachment.name === "video" &&
-        attachment.path &&
-        fs.existsSync(attachment.path)
-      ) {
-        videoPath = attachment.path;
-        console.log(`[Analysis Reporter] Found video: ${videoPath}`);
-        formData.append("video", fs.createReadStream(videoPath), {
-          filename: path.basename(videoPath),
-          contentType: "video/webm",
-        });
-      } else if (
-        attachment.name === "screenshot" &&
-        attachment.path &&
-        fs.existsSync(attachment.path)
-      ) {
-        console.log(`[Analysis Reporter] Found screenshot: ${attachment.path}`);
-        screenshotPaths.push(attachment.path);
-        // Send multiple screenshots if they exist
-        formData.append("screenshots", fs.createReadStream(attachment.path), {
-          filename: path.basename(attachment.path),
-          contentType: attachment.contentType,
-        });
-      }
-    }
-
-    if (!tracePath)
-      console.warn(
-        `[Analysis Reporter] Trace file not found or accessible for failed test: ${test.title}`
-      );
-    if (!videoPath)
-      console.warn(
-        `[Analysis Reporter] Video file not found or accessible for failed test: ${test.title}`
-      );
-
-    // --- Source Code ---
-    const sourcePath = test.location.file;
-    if (sourcePath && fs.existsSync(sourcePath)) {
-      console.log(`[Analysis Reporter] Found source code: ${sourcePath}`);
-      formData.append("sourceCode", fs.createReadStream(sourcePath), {
-        filename: path.basename(sourcePath),
-        contentType: "text/plain", // Adjust if needed (e.g., text/typescript)
-      });
-    } else {
-      console.warn(
-        `[Analysis Reporter] Source code file not found: ${sourcePath}`
-      );
-    }
-
-    // --- Send Data ---
     try {
+      // --- Basic Info, Error, Logs --- (Keep as before)
       console.log(
-        `[Analysis Reporter] Sending analysis data for "${test.title}"...`
+        `[Analysis Reporter] Appending basic info for "${test.title}"`
       );
-      const response = await axios.post(this.analysisServerUrl, formData, {
-        headers: formData.getHeaders(), // Important for multipart/form-data
-        maxBodyLength: Infinity, // Allow large uploads (traces/videos can be big)
-        maxContentLength: Infinity,
-      });
-      console.log(
-        `[Analysis Reporter] Server Response for "${test.title}":`,
-        response.status,
-        response.statusText
-      );
-    } catch (error: any) {
-      // Log more detailed error information if available
-      if (axios.isAxiosError(error)) {
-        console.error(
-          `[Analysis Reporter] Axios Error sending data for "${test.title}": ${error.message}`,
-          error.response?.status,
-          error.response?.data
+      formData.append("testTitle", test.title);
+      formData.append("testFile", test.location.file);
+      formData.append("lineNumber", test.location.line.toString());
+      formData.append("status", result.status);
+      formData.append("duration", result.duration.toString());
+      formData.append("retries", result.retry.toString());
+      if (result.error) {
+        formData.append(
+          "error",
+          JSON.stringify(
+            {
+              message: result.error.message || "No message",
+              stack: result.error.stack || "No stack trace",
+            },
+            null,
+            2
+          )
         );
       } else {
-        console.error(
-          `[Analysis Reporter] Non-Axios Error sending data for "${test.title}":`,
-          error.message || error
+        formData.append(
+          "error",
+          JSON.stringify({ message: "No error object reported" })
         );
       }
+      formData.append(
+        "stdout",
+        result.stdout.map((b) => b.toString("utf-8")).join("\n")
+      );
+      formData.append(
+        "stderr",
+        result.stderr.map((b) => b.toString("utf-8")).join("\n")
+      );
+      console.log(
+        `[Analysis Reporter] Appended basic info and logs for "${test.title}"`
+      );
+
+      // --- Artifacts (MODIFIED FOR TESTING) ---
+      console.log(
+        `[Analysis Reporter] Processing attachments for "${test.title}"`
+      );
+      const attachmentsToSend: {
+        field: string;
+        path: string;
+        filename: string;
+        contentType: string;
+      }[] = [];
+      for (const attachment of result.attachments) {
+        console.log(
+          `[Analysis Reporter] Checking attachment: Name='${attachment.name}', Path='${attachment.path}'`
+        );
+        if (attachment.path && fs.existsSync(attachment.path)) {
+          const baseName = path.basename(attachment.path);
+
+          // ***** START TEMPORARY MODIFICATION *****
+          // Comment out trace and video to test without large files
+          if (attachment.name === "trace") {
+            console.log(
+              `[Analysis Reporter] Preparing to add trace: ${attachment.path}`
+            );
+            attachmentsToSend.push({
+              field: "trace",
+              path: attachment.path,
+              filename: baseName,
+              contentType: "application/zip",
+            });
+          } else if (attachment.name === "video") {
+            console.log(
+              `[Analysis Reporter] Preparing to add video: ${attachment.path}`
+            );
+            attachmentsToSend.push({
+              field: "video",
+              path: attachment.path,
+              filename: baseName,
+              contentType: "video/webm",
+            });
+          } else if (attachment.name === "screenshot") {
+            // KEEP SCREENSHOTS
+            console.log(
+              `[Analysis Reporter] Preparing to add screenshot: ${attachment.path}`
+            );
+            attachmentsToSend.push({
+              field: "screenshots",
+              path: attachment.path,
+              filename: baseName,
+              contentType: attachment.contentType,
+            });
+          }
+          // ***** END TEMPORARY MODIFICATION *****
+        } else if (attachment.path) {
+          console.warn(
+            `[Analysis Reporter] Attachment path no longer exists just before adding: ${attachment.path} for attachment named ${attachment.name}`
+          );
+        } else {
+          console.log(
+            `[Analysis Reporter] Attachment named '${attachment.name}' has no path.`
+          );
+        }
+      }
+
+      // --- Source Code (Keep adding source code) ---
+      const sourcePath = test.location.file;
+      console.log(
+        `[Analysis Reporter] Checking source code path: ${sourcePath}`
+      );
+      if (sourcePath && fs.existsSync(sourcePath)) {
+        console.log(
+          `[Analysis Reporter] Preparing to add source code: ${sourcePath}`
+        );
+        attachmentsToSend.push({
+          field: "sourceCode",
+          path: sourcePath,
+          filename: path.basename(sourcePath),
+          contentType: "text/plain",
+        });
+      } else {
+        console.warn(
+          `[Analysis Reporter] Source code file not found or path invalid: ${sourcePath}`
+        );
+      }
+
+      // Append ONLY the selected files (screenshot, sourceCode)
+      console.log(
+        `[Analysis Reporter] Appending ${attachmentsToSend.length} files (NO TRACE/VIDEO) to FormData for "${test.title}"`
+      );
+      for (const att of attachmentsToSend) {
+        console.log(
+          `[Analysis Reporter] Attempting to append file: ${att.filename} (Path: ${att.path})`
+        );
+        try {
+          if (!fs.existsSync(att.path)) {
+            console.error(
+              `[Analysis Reporter] CRITICAL ERROR: File disappeared before streaming: ${att.path}`
+            );
+            fileAppendError = true;
+            continue;
+          }
+          const fileStream = fs.createReadStream(att.path);
+          fileStream.on("error", (streamErr) => {
+            console.error(
+              `[Analysis Reporter] Error reading stream for ${att.filename}: ${streamErr.message}`
+            );
+            fileAppendError = true;
+          });
+          formData.append(att.field, fileStream, {
+            filename: att.filename,
+            contentType: att.contentType,
+          });
+          console.log(
+            `[Analysis Reporter] Successfully appended ${att.filename} to FormData.`
+          );
+        } catch (streamError: any) {
+          console.error(
+            `[Analysis Reporter] Error creating read stream or appending ${att.filename}: ${streamError.message}`
+          );
+          fileAppendError = true;
+        }
+      }
+
+      if (fileAppendError) {
+        console.error(
+          `[Analysis Reporter] ERROR occurred during file appending process for "${test.title}". Request might be incomplete or fail.`
+        );
+      }
+      console.log(
+        `[Analysis Reporter] Finished preparing FormData for "${test.title}". File append errors: ${fileAppendError}`
+      );
+    } catch (formDataError: any) {
+      console.error(
+        `[Analysis Reporter] CRITICAL ERROR during FormData population for "${test.title}": ${formDataError.message}`,
+        formDataError.stack
+      );
+      return; // Don't proceed if setup failed
+    }
+
+    // --- Send Data (Keep axios call with timeout and detailed catch) ---
+    try {
+      console.log(
+        `[Analysis Reporter] Attempting axios.post (NO TRACE/VIDEO) for "${test.title}" to ${this.analysisServerUrl}...`
+      );
+      const response = await axios.post(this.analysisServerUrl, formData, {
+        headers: formData.getHeaders(),
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        timeout: 300000, // 5 minutes
+      });
+      console.log(
+        `[Analysis Reporter] axios.post successful for "${test.title}"`
+      );
+      console.log(
+        `[Analysis Reporter] Server Response Status: ${response.status} ${response.statusText}`
+      );
+    } catch (error: any) {
+      if (axios.isAxiosError(error)) {
+        /* ... detailed Axios error logging ... */
+        console.error(`  Axios Error Message: ${error.message}`);
+        console.error(`  Error Code: ${error.code}`);
+        console.error(`  Target URL: ${error.config?.url}`);
+        console.error(`  Request Config Timeout: ${error.config?.timeout}`);
+        if (error.response) {
+          console.error(`  Response Status: ${error.response.status}`);
+          console.error(
+            `  Response Data:`,
+            JSON.stringify(error.response.data)
+          );
+        } else if (error.request) {
+          console.error("  Request was made, but no response received.");
+        } else {
+          console.error("  Error setting up the request:", error.message);
+        }
+        // Specific codes
+        if (
+          error.code === "ECONNABORTED" ||
+          error.message.toLowerCase().includes("timeout")
+        ) {
+          console.error(`  >>> Diagnosis: CLIENT-SIDE TIMEOUT...`);
+        } else if (error.code === "ECONNREFUSED") {
+          console.error(`  >>> Diagnosis: CONNECTION REFUSED...`);
+        } else if (error.code === "ENOTFOUND") {
+          console.error(`  >>> Diagnosis: DNS/Hostname lookup issue...`);
+        } else if (
+          error.code === "EPIPE" ||
+          error.message.includes("socket hang up")
+        ) {
+          console.error(`  >>> Diagnosis: BROKEN PIPE or SOCKET HANG UP...`);
+        } else {
+          console.error(
+            `  >>> Diagnosis: Other network or request setup error.`
+          );
+        }
+      } else {
+        console.error(`  Non-Axios Error Type: ${error.name}`);
+        console.error(`  Non-Axios Error Message: ${error.message}`);
+        console.error(`  Error Stack: ${error.stack}`);
+      }
+    } finally {
+      console.log(
+        `[Analysis Reporter] sendAnalysisData processing finished for "${test.title}".`
+      );
     }
   }
 }
