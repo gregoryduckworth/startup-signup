@@ -9,5 +9,5 @@ export default defineConfig({
     video: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  reporter: "html",
+  reporter: [["./custom-reporter.ts"]],
 });

@@ -7,4 +7,5 @@ playwright-report
 results.json
 server/public
 test-results
+uploads
 vite.config.ts.*
